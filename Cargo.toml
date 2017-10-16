@@ -4,9 +4,11 @@ version = "0.1.0"
 
 description = "A set of types to make interacting with Windows APIs safer and easier."
 repository = "https://github.com/JohnColanduoni/winhandle"
+authors = ["john@colanduoni.com"]
+license = "MIT OR Apache-2.0"
+
 keywords = ["windows"]
 categories = ["os::windows-apis", "external-ffi-bindings"]
-license = "MIT OR Apache-2.0"
 
 [dependencies]
 log = ">=0.3"
