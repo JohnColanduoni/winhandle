@@ -186,6 +186,35 @@ impl WinHandle {
             Ok(HandleKind::Other(type_name))
         }
     }
+
+    pub fn access_mask(&self) -> io::Result<ACCESS_MASK> {
+        let info = self.basic_information()?;
+        Ok(info.GrantedAccess)
+    }
+
+    pub fn ref_count(&self) -> io::Result<ULONG> {
+        let info = self.basic_information()?;
+        Ok(info.HandleCount)
+    }
+
+    fn basic_information(&self) -> io::Result<PUBLIC_OBJECT_BASIC_INFORMATION> {
+        let nt_query_object = NtQueryObject.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "NtQueryObject function not found in ntdll.dll"))?;
+
+        unsafe {
+            // Get info size
+            let mut return_length: ULONG = 0;
+            let mut basic_info: PUBLIC_OBJECT_BASIC_INFORMATION = mem::zeroed();
+            match HRESULT_FROM_NT(nt_query_object(self.get(), OBJECT_INFORMATION_CLASS::BasicInformation, &mut basic_info as *mut _ as PVOID, mem::size_of_val(&basic_info) as ULONG, &mut return_length)) {
+                s if SUCCEEDED(s) => {},
+                s => return Err(io::Error::from_raw_os_error(s)),
+            }
+            if return_length as usize != mem::size_of::<PUBLIC_OBJECT_BASIC_INFORMATION>() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "NtQueryObject returned data of invalid size"));
+            }
+
+            Ok(basic_info)
+        }
+    }
 }
 
 impl AsRawHandle for WinHandle {
@@ -299,14 +328,25 @@ mod tests {
         assert!(!WinHandle::from_raw(0xABCD1 as _).is_some());
     }
 
+    #[test]
+    fn disk_file_access_mask() {
+        let file = fs::File::open(env::current_exe().unwrap()).unwrap();
+        let handle = WinHandle::cloned_ex(&file, false, ClonedHandleAccess::Explicit(FILE_READ_DATA)).unwrap();
+        assert_eq!(FILE_READ_DATA, handle.access_mask().unwrap());
+    }
+
+    #[test]
+    fn disk_file_handle_count() {
+        let file = fs::File::open(env::current_exe().unwrap()).unwrap();
+        let handle = WinHandle::cloned(&file).unwrap();
+        assert_eq!(2, handle.ref_count().unwrap());
+    }
 
     #[test]
     fn disk_file_handle_kind() {
-        unsafe {
-            let file = fs::File::open(env::current_exe().unwrap()).unwrap();
-            let handle = WinHandle::cloned(&file).unwrap();
-            assert_eq!(HandleKind::File(FileHandleKind::Disk), handle.kind().unwrap());
-        }
+        let file = fs::File::open(env::current_exe().unwrap()).unwrap();
+        let handle = WinHandle::cloned(&file).unwrap();
+        assert_eq!(HandleKind::File(FileHandleKind::Disk), handle.kind().unwrap());
     }
 
     #[test]

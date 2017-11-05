@@ -1,5 +1,4 @@
 #![allow(bad_style)]
-use ::{WinHandleTarget};
 
 use std::{ptr, mem, io};
 use std::ops::Deref;
@@ -62,6 +61,7 @@ pub enum OBJECT_INFORMATION_CLASS {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub struct PUBLIC_OBJECT_BASIC_INFORMATION {
     pub Attributes: ULONG,
     pub GrantedAccess: ACCESS_MASK,
