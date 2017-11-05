@@ -66,20 +66,20 @@ impl WinHandle {
         }
     }
 
-    pub fn cloned<T>(t: &T) -> io::Result<WinHandle> where T: AsRawHandle {
-        Self::cloned_ex(t, false, ClonedHandleAccess::Same)
+    pub fn clone_from<T>(t: &T) -> io::Result<WinHandle> where T: AsRawHandle {
+        Self::clone_from_ex(t, false, ClonedHandleAccess::Same)
     }
 
-    pub fn cloned_raw(handle: HANDLE) -> io::Result<WinHandle> {
-        unsafe { Self::cloned_raw_ex(handle, false, ClonedHandleAccess::Same) }
+    pub fn clone_from_raw(handle: HANDLE) -> io::Result<WinHandle> {
+        unsafe { Self::clone_from_raw_ex(handle, false, ClonedHandleAccess::Same) }
     }
 
-    pub fn cloned_ex<T>(t: &T, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> where T: AsRawHandle
+    pub fn clone_from_ex<T>(t: &T, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> where T: AsRawHandle
     {
-        unsafe { Self::cloned_raw_ex(t.as_raw_handle(), inheritable, access) }
+        unsafe { Self::clone_from_raw_ex(t.as_raw_handle(), inheritable, access) }
     }
 
-    pub unsafe fn cloned_raw_ex(handle: HANDLE, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> {
+    pub unsafe fn clone_from_raw_ex(handle: HANDLE, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> {
         let (access, flags) = match access {
             ClonedHandleAccess::Same => (0, DUPLICATE_SAME_ACCESS),
             ClonedHandleAccess::Explicit(access) => (access, 0),
@@ -169,11 +169,11 @@ impl WinHandleRef {
     }
 
     pub fn clone(&self) -> io::Result<WinHandle> {
-        WinHandle::cloned(self)
+        WinHandle::clone_from(self)
     }
 
     pub fn clone_ex(&self, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> {
-        WinHandle::cloned_ex(self, inheritable, access)
+        WinHandle::clone_from_ex(self, inheritable, access)
     }
 
     pub fn kind(&self) -> io::Result<HandleKind> {
@@ -427,7 +427,7 @@ mod tests {
     fn disk_file_handle_name() {
         let path = env::current_exe().unwrap();
         let file = fs::File::open(&path).unwrap();
-        let handle = WinHandle::cloned(&file).unwrap();
+        let handle = WinHandle::clone_from(&file).unwrap();
         let kernel_file_name = handle.name().unwrap().unwrap();
         let kernel_file_name = kernel_file_name.to_str().unwrap();
         assert!(kernel_file_name.starts_with(r#"\Device\"#));
@@ -439,21 +439,21 @@ mod tests {
     #[test]
     fn disk_file_access_mask() {
         let file = fs::File::open(env::current_exe().unwrap()).unwrap();
-        let handle = WinHandle::cloned_ex(&file, false, ClonedHandleAccess::Explicit(FILE_READ_DATA)).unwrap();
+        let handle = WinHandle::clone_from_ex(&file, false, ClonedHandleAccess::Explicit(FILE_READ_DATA)).unwrap();
         assert_eq!(FILE_READ_DATA, handle.access_mask().unwrap());
     }
 
     #[test]
     fn disk_file_handle_count() {
         let file = fs::File::open(env::current_exe().unwrap()).unwrap();
-        let handle = WinHandle::cloned(&file).unwrap();
+        let handle = WinHandle::clone_from(&file).unwrap();
         assert_eq!(2, handle.handle_count().unwrap());
     }
 
     #[test]
     fn disk_file_handle_kind() {
         let file = fs::File::open(env::current_exe().unwrap()).unwrap();
-        let handle = WinHandle::cloned(&file).unwrap();
+        let handle = WinHandle::clone_from(&file).unwrap();
         assert_eq!(HandleKind::File(FileHandleKind::Disk), handle.kind().unwrap());
     }
 
