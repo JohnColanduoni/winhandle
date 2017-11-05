@@ -7,9 +7,7 @@ extern crate kernel32;
 mod handle;
 mod comptr;
 mod mem;
-mod wstring;
 
 pub use handle::*;
 pub use comptr::*;
 pub use mem::*;
-pub use wstring::*;

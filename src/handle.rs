@@ -40,7 +40,10 @@ impl WinHandle {
     /// Wraps an existing raw Windows handle while checking for validity.
     /// 
     /// Note that this function will accept INVALID_HANDLE_VALUE as this is
-    /// returned by `GetCurrentProcess()`.
+    /// returned by `GetCurrentProcess()`. Win32 functions are not altogether
+    /// consistent in their error return values so this function should not be
+    /// used to directly validate the return value of a Win32 function; Use the
+    /// `winapi_handle_call` with appropriate error values for that.
     pub fn from_raw(handle: HANDLE) -> Option<WinHandle> {
         unsafe {
             let mut _flags = 0;
