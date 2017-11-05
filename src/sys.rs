@@ -57,6 +57,7 @@ lazy_static! {
 #[repr(C)]
 pub enum OBJECT_INFORMATION_CLASS {
     BasicInformation = 0,
+    NameInformation = 1,
     TypeInformation = 2,
 }
 
@@ -76,6 +77,10 @@ pub struct PUBLIC_OBJECT_TYPE_INFORMATION {
     Reserved: [ULONG; 22],
 }
 
+#[repr(C)]
+pub struct PUBLIC_OBJECT_NAME_INFORMATION {
+    pub Name: UNICODE_STRING,
+}
 
 // Needed for putting a module handle in a lazy_static
 #[derive(Clone, Copy)]

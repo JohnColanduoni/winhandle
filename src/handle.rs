@@ -1,6 +1,6 @@
 use sys::*;
 
-use std::{io, mem, ptr};
+use std::{fmt, io, mem, ptr};
 use std::ops::{Deref, DerefMut};
 use std::ffi::OsString;
 use std::os::windows::prelude::*;
@@ -9,7 +9,6 @@ use winapi::*;
 use kernel32::*;
 use widestring::WideCStr;
 
-#[derive(Debug)]
 pub struct WinHandle(HANDLE);
 
 unsafe impl Send for WinHandle {
@@ -187,12 +186,37 @@ impl WinHandle {
         }
     }
 
+    pub fn name(&self) -> io::Result<Option<OsString>> {
+         let nt_query_object = NtQueryObject.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "NtQueryObject function not found in ntdll.dll"))?;
+
+        unsafe {
+            // Get info size
+            let mut return_length: ULONG = 0;
+            nt_query_object(self.get(), OBJECT_INFORMATION_CLASS::NameInformation, ptr::null_mut(), 0, &mut return_length);
+            let mut buffer = vec![0; return_length as usize];
+            match HRESULT_FROM_NT(nt_query_object(self.get(), OBJECT_INFORMATION_CLASS::NameInformation, buffer.as_mut_ptr() as PVOID, buffer.len() as ULONG, &mut return_length)) {
+                s if SUCCEEDED(s) => {},
+                s => return Err(io::Error::from_raw_os_error(s)),
+            }
+            if return_length as usize != buffer.len() || buffer.len() < mem::size_of::<PUBLIC_OBJECT_NAME_INFORMATION>() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "NtQueryObject returned data of invalid size"));
+            }
+
+            let type_info = &*(buffer.as_ptr() as *const PUBLIC_OBJECT_NAME_INFORMATION);
+            if !type_info.Name.Buffer.is_null() {
+                Ok(Some(WideCStr::from_ptr_str(type_info.Name.Buffer).to_os_string()))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
     pub fn access_mask(&self) -> io::Result<ACCESS_MASK> {
         let info = self.basic_information()?;
         Ok(info.GrantedAccess)
     }
 
-    pub fn ref_count(&self) -> io::Result<ULONG> {
+    pub fn handle_count(&self) -> io::Result<ULONG> {
         let info = self.basic_information()?;
         Ok(info.HandleCount)
     }
@@ -224,6 +248,22 @@ impl AsRawHandle for WinHandle {
 impl<T> From<T> for WinHandle where T: IntoRawHandle {
     fn from(t: T) -> Self {
         WinHandle(t.into_raw_handle())
+    }
+}
+
+impl fmt::Debug for WinHandle {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let (Ok(name), Ok(kind)) = (self.name(), self.kind()) {
+            write!(f, "WinHandle {{ name: ")?;
+            if let Some(name) = name {
+                write!(f, "{:?}", name)?;
+            } else {
+                write!(f, "None")?;
+            }
+            write!(f, ", kind: {:?} }}", kind)
+        } else {
+            write!(f, "WinHandle({:?})", self.get())
+        }
     }
 }
 
@@ -328,6 +368,20 @@ mod tests {
         assert!(!WinHandle::from_raw(0xABCD1 as _).is_some());
     }
 
+
+    #[test]
+    fn disk_file_handle_name() {
+        let path = env::current_exe().unwrap();
+        let file = fs::File::open(&path).unwrap();
+        let handle = WinHandle::cloned(&file).unwrap();
+        let kernel_file_name = handle.name().unwrap().unwrap();
+        let kernel_file_name = kernel_file_name.to_str().unwrap();
+        assert!(kernel_file_name.starts_with(r#"\Device\"#));
+        let mut components = path.components();
+        components.next();
+        assert!(kernel_file_name.ends_with(components.as_path().to_str().unwrap()));
+    }
+
     #[test]
     fn disk_file_access_mask() {
         let file = fs::File::open(env::current_exe().unwrap()).unwrap();
@@ -339,7 +393,7 @@ mod tests {
     fn disk_file_handle_count() {
         let file = fs::File::open(env::current_exe().unwrap()).unwrap();
         let handle = WinHandle::cloned(&file).unwrap();
-        assert_eq!(2, handle.ref_count().unwrap());
+        assert_eq!(2, handle.handle_count().unwrap());
     }
 
     #[test]
