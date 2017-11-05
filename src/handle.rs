@@ -1,3 +1,4 @@
+use ::{Opaque};
 use sys::*;
 
 use std::{fmt, io, mem, ptr};
@@ -11,9 +12,16 @@ use widestring::WideCStr;
 
 pub struct WinHandle(HANDLE);
 
+pub struct WinHandleRef(Opaque);
+
 unsafe impl Send for WinHandle {
 }
 unsafe impl Sync for WinHandle {
+}
+
+unsafe impl Send for WinHandleRef {
+}
+unsafe impl Sync for WinHandleRef {
 }
 
 impl Drop for WinHandle {
@@ -58,21 +66,11 @@ impl WinHandle {
         }
     }
 
-    pub fn clone(&self) -> io::Result<WinHandle> {
-        Self::cloned(self)
-    }
-
-    pub fn clone_ex(&self, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> {
-        Self::cloned_ex(self, inheritable, access)
-    }
-
-    pub fn cloned<T>(t: &T) -> io::Result<WinHandle> where T: AsRawHandle
-    {
+    pub fn cloned<T>(t: &T) -> io::Result<WinHandle> where T: AsRawHandle {
         Self::cloned_ex(t, false, ClonedHandleAccess::Same)
     }
 
-    pub fn cloned_raw<T>(handle: HANDLE) -> io::Result<WinHandle>
-    {
+    pub fn cloned_raw(handle: HANDLE) -> io::Result<WinHandle> {
         unsafe { Self::cloned_raw_ex(handle, false, ClonedHandleAccess::Same) }
     }
 
@@ -99,6 +97,12 @@ impl WinHandle {
         Ok(new_handle.unwrap())
     }
 
+    pub fn into_raw(self) -> HANDLE {
+        let handle = self.0;
+        mem::forget(self);
+        handle
+    }
+
     pub fn modify(self, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> {
         let (access, flags) = match access {
             ClonedHandleAccess::Same => (0, DUPLICATE_SAME_ACCESS),
@@ -122,14 +126,54 @@ impl WinHandle {
         Ok(new_handle.unwrap())
     }
 
-    pub fn get(&self) -> HANDLE {
-        self.0
+}
+
+impl Deref for WinHandle {
+    type Target = WinHandleRef;
+
+    fn deref(&self) -> &WinHandleRef {
+        unsafe { mem::transmute(self.0) }
+    }
+}
+
+impl WinHandleRef {
+    pub fn from<T>(handle: &T) -> &Self where T: AsRawHandle {
+        unsafe { Self::from_raw_unchecked(handle.as_raw_handle()) }
     }
 
-    pub fn into_raw(self) -> HANDLE {
-        let handle = self.0;
-        mem::forget(self);
-        handle
+    #[inline]
+    pub unsafe fn from_raw_unchecked<'a>(handle: HANDLE) -> &'a Self {
+        mem::transmute(handle)
+    }
+
+    /// Wraps an existing raw Windows handle while checking for validity.
+    /// 
+    /// Note that this function will accept INVALID_HANDLE_VALUE as this is
+    /// returned by `GetCurrentProcess()`. Win32 functions are not altogether
+    /// consistent in their error return values so this function should not be
+    /// used to directly validate the return value of a Win32 function; Use the
+    /// `winapi_handle_call` with appropriate error values for that.
+    pub fn from_raw(handle: &HANDLE) -> Option<&Self> {
+        unsafe {
+            let mut _flags = 0;
+            if GetHandleInformation(*handle, &mut _flags) == TRUE {
+                Some(Self::from_raw_unchecked(*handle))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn get(&self) -> HANDLE {
+        unsafe { mem::transmute(self) }
+    }
+
+    pub fn clone(&self) -> io::Result<WinHandle> {
+        WinHandle::cloned(self)
+    }
+
+    pub fn clone_ex(&self, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> {
+        WinHandle::cloned_ex(self, inheritable, access)
     }
 
     pub fn kind(&self) -> io::Result<HandleKind> {
@@ -242,7 +286,11 @@ impl WinHandle {
 }
 
 impl AsRawHandle for WinHandle {
-    fn as_raw_handle(&self) -> HANDLE { self.0 }
+    fn as_raw_handle(&self) -> HANDLE { self.get() }
+}
+
+impl AsRawHandle for WinHandleRef {
+    fn as_raw_handle(&self) -> HANDLE { self.get() }
 }
 
 impl<T> From<T> for WinHandle where T: IntoRawHandle {
@@ -252,6 +300,12 @@ impl<T> From<T> for WinHandle where T: IntoRawHandle {
 }
 
 impl fmt::Debug for WinHandle {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&**self, f)
+    }
+}
+
+impl fmt::Debug for WinHandleRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let (Ok(name), Ok(kind)) = (self.name(), self.kind()) {
             write!(f, "WinHandle {{ name: ")?;

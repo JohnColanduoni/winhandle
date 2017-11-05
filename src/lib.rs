@@ -17,3 +17,5 @@ mod sys;
 pub use handle::*;
 pub use comptr::*;
 pub use mem::*;
+
+enum Opaque {}
