@@ -1,9 +1,13 @@
+use sys::*;
+
 use std::{io, mem, ptr};
 use std::ops::{Deref, DerefMut};
+use std::ffi::OsString;
 use std::os::windows::prelude::*;
 
 use winapi::*;
 use kernel32::*;
+use widestring::WideCStr;
 
 #[derive(Debug)]
 pub struct WinHandle(HANDLE);
@@ -128,6 +132,60 @@ impl WinHandle {
         mem::forget(self);
         handle
     }
+
+    pub fn kind(&self) -> io::Result<HandleKind> {
+        let nt_query_object = NtQueryObject.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "NtQueryObject function not found in ntdll.dll"))?;
+
+        unsafe {
+            // Get info size
+            let mut return_length: ULONG = 0;
+            nt_query_object(self.get(), OBJECT_INFORMATION_CLASS::TypeInformation, ptr::null_mut(), 0, &mut return_length);
+            let mut buffer = vec![0; return_length as usize];
+            match HRESULT_FROM_NT(nt_query_object(self.get(), OBJECT_INFORMATION_CLASS::TypeInformation, buffer.as_mut_ptr() as PVOID, buffer.len() as ULONG, &mut return_length)) {
+                s if SUCCEEDED(s) => {},
+                s => return Err(io::Error::from_raw_os_error(s)),
+            }
+            if return_length as usize != buffer.len() || buffer.len() < mem::size_of::<PUBLIC_OBJECT_TYPE_INFORMATION>() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "NtQueryObject returned data of invalid size"));
+            }
+
+            let type_info = &*(buffer.as_ptr() as *const PUBLIC_OBJECT_TYPE_INFORMATION);
+            let type_name = WideCStr::from_ptr_str(type_info.TypeName.Buffer).to_os_string();
+
+            match type_name.to_str() {
+                Some("File") => {
+                    // Get the file subtype via GetFileType
+                    let kind = match GetFileType(self.get()) {
+                        FILE_TYPE_DISK => FileHandleKind::Disk,
+                        FILE_TYPE_CHAR => FileHandleKind::Char,
+                        FILE_TYPE_PIPE => FileHandleKind::Pipe,
+                        FILE_TYPE_UNKNOWN => {
+                            if GetLastError() != NO_ERROR {
+                                return Err(io::Error::last_os_error());
+                            } else {
+                                FileHandleKind::Unknown
+                            }
+                        },
+                        other => FileHandleKind::Other(other),
+                    };
+
+                    return Ok(HandleKind::File(kind));
+                },
+                Some("Process") => return Ok(HandleKind::Process),
+                Some("Thread") => return Ok(HandleKind::Thread),
+                Some("Token") => return Ok(HandleKind::AccessToken),
+                Some("Job") => return Ok(HandleKind::Job),
+                Some("Desktop") => return Ok(HandleKind::Desktop),
+                Some("WindowStation") => return Ok(HandleKind::WindowStation),
+                Some("Mutant") => return Ok(HandleKind::Mutex),
+                Some("Semaphore") => return Ok(HandleKind::Semaphore),
+                Some("Event") => return Ok(HandleKind::Event),
+                _ => {}
+            }
+
+            Ok(HandleKind::Other(type_name))
+        }
+    }
 }
 
 impl AsRawHandle for WinHandle {
@@ -190,9 +248,38 @@ impl DerefMut for WinHandleTarget {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum HandleKind {
+    File(FileHandleKind),
+    Process,
+    Thread,
+    AccessToken,
+    Job,
+    Desktop,
+    WindowStation,
+    Mutex,
+    Semaphore,
+    Event,
+    Other(OsString),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum FileHandleKind {
+    Disk,
+    Char,
+    Pipe,
+    Unknown,
+    Other(DWORD),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::{fs, env};
+
+    use advapi32::*;
+    use user32::*;
 
     #[test]
     fn get_current_process_handle_valid() {
@@ -210,5 +297,133 @@ mod tests {
     #[test]
     fn random_handle_invalid() {
         assert!(!WinHandle::from_raw(0xABCD1 as _).is_some());
+    }
+
+
+    #[test]
+    fn disk_file_handle_kind() {
+        unsafe {
+            let file = fs::File::open(env::current_exe().unwrap()).unwrap();
+            let handle = WinHandle::cloned(&file).unwrap();
+            assert_eq!(HandleKind::File(FileHandleKind::Disk), handle.kind().unwrap());
+        }
+    }
+
+    #[test]
+    fn anon_pipe_handle_kind() {
+        unsafe {
+            let mut read_pipe = WinHandleTarget::new();
+            let mut write_pipe = WinHandleTarget::new();
+            winapi_bool_call!(assert: CreatePipe(
+                &mut *read_pipe,
+                &mut *write_pipe,
+                ptr::null_mut(),
+                0,
+            ));
+            let read_pipe = read_pipe.unwrap();
+            assert_eq!(HandleKind::File(FileHandleKind::Pipe), read_pipe.kind().unwrap());
+        }
+    }
+
+    #[test]
+    fn mutex_handle_kind() {
+        unsafe {
+            let mutex = winapi_handle_call!(assert: CreateMutexW(
+                ptr::null_mut(),
+                FALSE,
+                ptr::null(),
+            ));
+            assert_eq!(HandleKind::Mutex, mutex.kind().unwrap());
+        }
+    }
+
+    #[test]
+    fn semaphore_handle_kind() {
+        unsafe {
+            let mutex = winapi_handle_call!(assert: CreateSemaphoreW(
+                ptr::null_mut(),
+                0,
+                1,
+                ptr::null(),
+            ));
+            assert_eq!(HandleKind::Semaphore, mutex.kind().unwrap());
+        }
+    }
+
+    #[test]
+    fn event_handle_kind() {
+        unsafe {
+            let mutex = winapi_handle_call!(assert: CreateEventW(
+                ptr::null_mut(),
+                TRUE,
+                TRUE,
+                ptr::null(),
+            ));
+            assert_eq!(HandleKind::Event, mutex.kind().unwrap());
+        }
+    }
+
+    #[test]
+    fn current_process_handle_kind() {
+        unsafe {
+            let handle = WinHandle::from_raw(GetCurrentProcess()).unwrap();
+            assert_eq!(HandleKind::Process, handle.kind().unwrap());
+        }
+    }
+
+
+    #[test]
+    fn current_thread_handle_kind() {
+        unsafe {
+            let handle = WinHandle::from_raw(GetCurrentThread()).unwrap();
+            assert_eq!(HandleKind::Thread, handle.kind().unwrap());
+        }
+    }
+
+    #[test]
+    fn current_process_token_handle_kind() {
+        unsafe {
+            let mut handle = WinHandleTarget::new();
+            winapi_bool_call!(assert: OpenProcessToken(
+                GetCurrentProcess(),
+                TOKEN_ALL_ACCESS,
+                &mut *handle,
+            ));
+            let handle = handle.unwrap();
+            assert_eq!(HandleKind::AccessToken, handle.kind().unwrap());
+        }
+    }
+
+    #[test]
+    fn job_handle_kind() {
+        unsafe {
+            let handle = winapi_handle_call!(assert: CreateJobObjectW(
+                ptr::null_mut(), ptr::null_mut(),
+            ));
+            assert_eq!(HandleKind::Job, handle.kind().unwrap());
+        }
+    }
+
+    #[test]
+    fn desktop_handle_kind() {
+        unsafe {
+            let handle = WinHandle::from_raw(GetThreadDesktop(
+                GetCurrentThreadId(),
+            ) as _).unwrap();
+            assert_eq!(HandleKind::Desktop, handle.kind().unwrap());
+        }
+    }
+
+    #[test]
+    fn winstation_handle_kind() {
+        unsafe {
+            let handle = WinHandle::from_raw(GetProcessWindowStation() as _).unwrap();
+            assert_eq!(HandleKind::WindowStation, handle.kind().unwrap());
+        }
+    }
+
+    #[link = "user32.dll"]
+    extern "system" {
+        fn GetProcessWindowStation() -> HWINSTA;
     }
 }
