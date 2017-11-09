@@ -1,6 +1,6 @@
 [package]
 name = "winhandle"
-version = "0.1.0"
+version = "0.2.0"
 
 description = "A set of types to make interacting with Windows APIs safer and easier."
 repository = "https://github.com/JohnColanduoni/winhandle"
