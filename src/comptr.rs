@@ -2,7 +2,7 @@ use std::{ptr, mem};
 use std::ops::{Deref, DerefMut};
 use std::marker::PhantomData;
 
-use winapi::*;
+use winapi::um::unknwnbase::IUnknown;
 
 pub struct ComPtr<T>(*mut IUnknown, PhantomData<T>);
 pub struct ComPtrTarget<T>(*mut IUnknown, PhantomData<T>);

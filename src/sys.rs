@@ -3,8 +3,10 @@
 use std::{ptr, mem, io};
 use std::ops::Deref;
 
-use winapi::*;
-use kernel32::*;
+use winapi::um::winnt::{HANDLE, HRESULT, PVOID, LPSTR, ACCESS_MASK};
+use winapi::shared::ntdef::{UNICODE_STRING};
+use winapi::shared::minwindef::{DWORD, HMODULE, ULONG, PULONG};
+use winapi::um::libloaderapi::{GetModuleHandleExW, GetProcAddress};
 use widestring::WideCString;
 
 pub fn HRESULT_FROM_NT(x: DWORD) -> HRESULT {

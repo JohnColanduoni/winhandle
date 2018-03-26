@@ -1,7 +1,7 @@
 use std::{mem};
 use std::ops::{Deref, DerefMut};
 
-use kernel32::*;
+use winapi::um::winbase::{LocalFree};
 
 pub struct LocalPtr<T>(*mut T);
 

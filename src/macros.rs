@@ -1,7 +1,9 @@
 #[doc(hidden)]
-pub use winapi::{FALSE, E_FAIL, INVALID_HANDLE_VALUE, S_OK};
-pub use winapi::winerror::SUCCEEDED;
-pub use kernel32::{GetLastError};
+pub use winapi::shared::minwindef::{FALSE};
+pub use winapi::shared::winerror::{E_FAIL, S_OK};
+pub use winapi::shared::winerror::{SUCCEEDED};
+pub use winapi::um::errhandlingapi::{GetLastError};
+pub use winapi::um::handleapi::{INVALID_HANDLE_VALUE};
 
 #[macro_export]
 macro_rules! winapi_bool_call {
@@ -193,8 +195,8 @@ mod tests {
     #[test]
     fn winapi_handle_call_ihv() {
         use std::{ptr, io};
-        use winapi::{GENERIC_READ, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL};
-        use kernel32::CreateFileA;
+        use winapi::um::winnt::{GENERIC_READ, FILE_ATTRIBUTE_NORMAL};
+        use winapi::um::fileapi::{CreateFileA, OPEN_EXISTING};
 
         let err = unsafe { winapi_handle_call!(CreateFileA(
             b"\0".as_ptr() as *const i8,
@@ -212,8 +214,9 @@ mod tests {
     #[test]
     fn winapi_handle_call_null() {
         use std::{ptr};
-        use winapi::{FALSE, ERROR_INVALID_HANDLE};
-        use kernel32::{CreateMutexA, CreateEventA};
+        use winapi::shared::minwindef::{FALSE};
+        use winapi::shared::winerror::{ERROR_INVALID_HANDLE};
+        use winapi::um::synchapi::{CreateMutexA, CreateEventA};
 
         let _event = unsafe { winapi_handle_call!(CreateEventA(
             ptr::null_mut(),
@@ -233,7 +236,7 @@ mod tests {
 
     #[test]
     fn catch_panic_hresult_empty() {
-        use winapi::S_OK;
+        use winapi::shared::winerror::S_OK;
 
         let result = catch_panic_hresult! {};
 
@@ -242,7 +245,7 @@ mod tests {
 
      #[test]
     fn catch_panic_hresult() {
-        use winapi::E_FAIL;
+        use winapi::shared::winerror::E_FAIL;
 
         let result = catch_panic_hresult! {
             panic!("error!");

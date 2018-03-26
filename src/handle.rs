@@ -6,8 +6,15 @@ use std::ops::{Deref, DerefMut};
 use std::ffi::OsString;
 use std::os::windows::prelude::*;
 
-use winapi::*;
-use kernel32::*;
+use winapi::um::winnt::{HANDLE, PVOID, ACCESS_MASK};
+use winapi::um::winnt::{DUPLICATE_SAME_ACCESS, DUPLICATE_CLOSE_SOURCE};
+use winapi::shared::minwindef::{DWORD, ULONG, TRUE, FALSE};
+use winapi::shared::winerror::{SUCCEEDED, NO_ERROR};
+use winapi::um::handleapi::{INVALID_HANDLE_VALUE, CloseHandle, GetHandleInformation, DuplicateHandle};
+use winapi::um::processthreadsapi::{GetCurrentProcess};
+use winapi::um::fileapi::{GetFileType};
+use winapi::um::winbase::{FILE_TYPE_CHAR, FILE_TYPE_DISK, FILE_TYPE_PIPE, FILE_TYPE_UNKNOWN};
+use winapi::um::errhandlingapi::{GetLastError};
 use widestring::WideCStr;
 
 pub struct WinHandle(HANDLE);
@@ -76,7 +83,7 @@ impl WinHandle {
 
     pub fn clone_from_ex<T>(t: &T, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> where T: AsRawHandle
     {
-        unsafe { Self::clone_from_raw_ex(t.as_raw_handle(), inheritable, access) }
+        unsafe { Self::clone_from_raw_ex(mem::transmute(t.as_raw_handle()), inheritable, access) }
     }
 
     pub unsafe fn clone_from_raw_ex(handle: HANDLE, inheritable: bool, access: ClonedHandleAccess) -> io::Result<WinHandle> {
@@ -138,7 +145,7 @@ impl Deref for WinHandle {
 
 impl WinHandleRef {
     pub fn from<T>(handle: &T) -> &Self where T: AsRawHandle {
-        unsafe { Self::from_raw_unchecked(handle.as_raw_handle()) }
+        unsafe { Self::from_raw_unchecked(mem::transmute(handle.as_raw_handle())) }
     }
 
     #[inline]
@@ -286,16 +293,16 @@ impl WinHandleRef {
 }
 
 impl AsRawHandle for WinHandle {
-    fn as_raw_handle(&self) -> HANDLE { self.get() }
+    fn as_raw_handle(&self) -> RawHandle { unsafe { mem::transmute(self.get()) } }
 }
 
 impl AsRawHandle for WinHandleRef {
-    fn as_raw_handle(&self) -> HANDLE { self.get() }
+    fn as_raw_handle(&self) -> RawHandle { unsafe { mem::transmute(self.get()) } }
 }
 
 impl<T> From<T> for WinHandle where T: IntoRawHandle {
     fn from(t: T) -> Self {
-        WinHandle(t.into_raw_handle())
+        unsafe { WinHandle(mem::transmute(t.into_raw_handle())) }
     }
 }
 
@@ -401,8 +408,13 @@ mod tests {
 
     use std::{fs, env};
 
-    use advapi32::*;
-    use user32::*;
+    use winapi::shared::minwindef::{HWINSTA};
+    use winapi::um::winnt::{TOKEN_ALL_ACCESS, FILE_READ_DATA};
+    use winapi::um::winuser::{GetThreadDesktop};
+    use winapi::um::processthreadsapi::{GetCurrentThreadId, GetCurrentThread, OpenProcessToken};
+    use winapi::um::namedpipeapi::{CreatePipe};
+    use winapi::um::synchapi::{CreateMutexW, CreateEventW, CreateSemaphoreW};
+    use winapi::um::jobapi2::{CreateJobObjectW};
 
     #[test]
     fn get_current_process_handle_valid() {
